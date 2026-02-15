@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
   },
   lastActivitySection: {
     marginTop: 32,
-    marginBottom: 24,
+    marginBottom: 8,
   },
   sectionHeader: {
     flexDirection: 'row',
