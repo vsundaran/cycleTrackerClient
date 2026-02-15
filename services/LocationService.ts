@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LOCATION_TASK_NAME = 'background-location-task';
 const RIDE_STATE_KEY = 'ride_state';
+const NOTIFICATION_ID = 'ride-tracking-status';
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -40,12 +41,13 @@ export const initBackgroundFetch = async () => {
         });
     }
     
+
     // Setup notification channel for Android
     if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('ride-tracking', {
             name: 'Ride Tracking',
             importance: Notifications.AndroidImportance.LOW,
-            vibrationPattern: [0, 250, 250, 250],
+            vibrationPattern: null, // No vibration
             lightColor: '#FF231F7C',
         });
     }
@@ -75,7 +77,11 @@ const handleLocationUpdates = async (locations: Location.LocationObject[]) => {
         );
     }
     
-    state.totalDistance += dist;
+    // basic noise filter
+    if (dist > 2) {
+        state.totalDistance += dist;
+    }
+    
     state.lastLocation = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
     });
 
@@ -101,12 +107,14 @@ const updateNotification = async (state: RideState) => {
   const distanceKm = (state.totalDistance / 1000).toFixed(2);
 
   await Notifications.scheduleNotificationAsync({
+    identifier: NOTIFICATION_ID,
     content: {
       title: 'Ride in Progress',
       body: `Time: ${timeStr} • Dist: ${distanceKm} km`,
       sticky: true,
       autoDismiss: false,
       color: '#4ade80',
+      priority: Notifications.AndroidNotificationPriority.LOW,
     },
     trigger: null,
   });
@@ -147,6 +155,7 @@ export const stopBackgroundTracking = async () => {
     await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
   }
   await AsyncStorage.removeItem(RIDE_STATE_KEY);
+  await Notifications.dismissNotificationAsync(NOTIFICATION_ID);
   await Notifications.dismissAllNotificationsAsync();
 };
 

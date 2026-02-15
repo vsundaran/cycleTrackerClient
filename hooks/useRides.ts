@@ -77,8 +77,9 @@ export const useEndRide = () => {
       return data;
     },
     onSuccess: (data) => {
+        // Invalidate 'rides' list and the specific 'ride' to ensure summary gets fresh data
       queryClient.invalidateQueries({ queryKey: ['rides'] });
-      queryClient.invalidateQueries({ queryKey: ['ride', data._id] });
+      queryClient.invalidateQueries({ queryKey: ['ride'] }); 
       queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });

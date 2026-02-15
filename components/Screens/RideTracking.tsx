@@ -71,6 +71,8 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
   const [distance, setDistance] = useState(0);
+  const [currentSpeed, setCurrentSpeed] = useState(0);
+  const lastLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
 
   const createRideMutation = useCreateRide();
   const updateCoordsMutation = useUpdateRideCoordinates();
@@ -137,10 +139,18 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
           {
             accuracy: Location.Accuracy.BestForNavigation,
             timeInterval: 1000,
-            distanceInterval: 5,
+            distanceInterval: 2, // Reduced for more frequent updates
           },
           (newLocation) => {
             setLocation(newLocation);
+            
+            // Calculate speed (convert m/s to km/h)
+            // Ensure speed is non-negative. location.coords.speed is -1 if invalid
+            const speedKmh = (newLocation.coords.speed && newLocation.coords.speed > 0) 
+              ? newLocation.coords.speed * 3.6 
+              : 0;
+            setCurrentSpeed(speedKmh);
+
             setRouteCoordinates((prev) => [
               ...prev,
               {
@@ -149,17 +159,25 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
               },
             ]);
             
-            // basic distance calc for UI (independent of background serving notification)
-            if (routeCoordinates.length > 0) {
-                const last = routeCoordinates[routeCoordinates.length - 1];
+            // Calculate distance using Ref to avoid stale closure
+            if (lastLocationRef.current) {
                 const dist = calculateDistance(
-                    last.latitude,
-                    last.longitude,
+                    lastLocationRef.current.latitude,
+                    lastLocationRef.current.longitude,
                     newLocation.coords.latitude,
                     newLocation.coords.longitude
                 );
-                setDistance(prev => prev + dist);
+                // Only add distance if it's reasonable (e.g. > 2 meters to avoid noise)
+                if (dist > 0.002) {
+                     setDistance(prev => prev + dist);
+                }
             }
+            
+            // Update last location ref
+            lastLocationRef.current = {
+                latitude: newLocation.coords.latitude,
+                longitude: newLocation.coords.longitude
+            };
           }
         );
       })();
@@ -353,10 +371,10 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
               <View style={styles.metricItem}>
                 <View style={styles.metricHeader}>
                   <Gauge size={14} color="#4ade80" />
-                  <Text style={styles.metricLabel}>AVG SPEED</Text>
+                  <Text style={styles.metricLabel}>CURRENT SPEED</Text>
                 </View>
                 <Text style={styles.metricValue}>
-                  {avgSpeed.toFixed(1)} <Text style={styles.metricUnit}>km/h</Text>
+                  {currentSpeed.toFixed(1)} <Text style={styles.metricUnit}>km/h</Text>
                 </Text>
               </View>
             </View>
