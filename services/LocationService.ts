@@ -56,7 +56,7 @@ export const initBackgroundFetch = async () => {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('ride-tracking', {
       name: 'Ride Tracking',
-      importance: Notifications.AndroidImportance.HIGH, // HIGH for lock screen visibility
+      importance: Notifications.AndroidImportance.LOW, // LOW to suppress sound and vibration
       vibrationPattern: null,
       lightColor: '#4ade80',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -183,7 +183,9 @@ const updateRideNotification = async () => {
         sticky: true,
         autoDismiss: false,
         color: '#4ade80',
-        priority: Notifications.AndroidNotificationPriority.HIGH,
+        priority: Notifications.AndroidNotificationPriority.LOW,
+        sound: false,
+        vibrate: [0, 0, 0, 0] as any, // Explicitly disable vibration
         categoryIdentifier: 'ride-active',
         data: { rideId: 'current' },
       },

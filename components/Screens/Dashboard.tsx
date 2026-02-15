@@ -11,7 +11,7 @@ import { AnimatedCard } from '../../animations/components/AnimatedCard';
 import { AnimatedPressable } from '../../animations/components/AnimatedPressable';
 import { RideRouteMap } from '../ui/RideRouteMap';
 
-export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: string) => void }) {
+export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: string, params?: any) => void }) {
   const { user: authUser } = useAuth();
   const { data: profile, isLoading: isProfileLoading } = useProfile();
   const { data: rides, isLoading: isRidesLoading } = useRides();
@@ -31,7 +31,7 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       {/* Header Section */}
       <View style={styles.header}>
         <View style={styles.avatarContainer}>
@@ -45,7 +45,11 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
         </View>
       </View>
 
-      <ScrollView style={styles.main} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.main} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 40 }}
+      >
         {/* Stats Section */}
         <View style={styles.statsGrid}>
           {/* Calories Card */}
@@ -139,7 +143,7 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
                 <AnimatedCard 
                   key={ride._id || index} 
                   index={index + 4} // Stagger after stats
-                  onPress={() => onNavigate('RideSummary')}
+                  onPress={() => onNavigate('RideSummary', { rideId: ride._id })}
                   style={{ borderRadius: 16, overflow: 'hidden', height: 128, backgroundColor: '#f1f5f9' }}
                 >
                   {ride.status === 'active' ? (

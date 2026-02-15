@@ -10,6 +10,22 @@ import { CustomModal } from '../ui/CustomModal';
 
 export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavigate: (screen: string, params?: any) => void, rideId?: string }) {
   const { data: ride, isLoading, refetch } = useRide(rideId);
+  
+  // Refetch data every 5 seconds if the ride is still active
+  React.useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    
+    if (ride?.status === 'active') {
+      interval = setInterval(() => {
+        refetch();
+      }, 5000);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [ride?.status, refetch]);
+
   const endRideMutation = useEndRide();
 
   const [showStopModal, setShowStopModal] = React.useState(false);
@@ -112,7 +128,7 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => onNavigate('Activities')}>
           <ArrowLeft size={24} color="#1f2937" />
@@ -121,7 +137,11 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView style={styles.main} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.main} 
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 40 }}
+      >
         <View style={styles.mapContainer}>
           <View style={styles.mapWrapper}>
             <MapView

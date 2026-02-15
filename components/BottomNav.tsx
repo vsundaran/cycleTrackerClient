@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LayoutGrid, Bike, User } from 'lucide-react-native';
 
 interface BottomNavProps {
@@ -23,9 +24,13 @@ export default function BottomNav({ currentScreen, onNavigate }: BottomNavProps)
   };
 
   const activeTab = getActiveTab();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
+    <View style={[
+      styles.container, 
+      { paddingBottom: Math.max(insets.bottom, 16) } // Dynamically adjust based on system navigation bar
+    ]}>
       {TABS.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
@@ -52,7 +57,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     paddingVertical: 12,
-    paddingBottom: 24,
     borderTopWidth: 1,
     borderTopColor: 'rgba(15, 23, 42, 0.05)',
     backgroundColor: '#FFFFFF',
