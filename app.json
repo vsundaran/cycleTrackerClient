@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Cycle Tracker",
-    "slug": "cycle-tracker",
+    "name": "Cardio Tracker",
+    "slug": "cardio-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,7 +13,18 @@
       "backgroundColor": "#ecfdf5"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "config": {
+        "googleMapsApiKey": "AIzaSyBBG8cIUFEmmXmCIFftIATPkTS3kxBL28A"
+      },
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Cardio Tracker needs access to your location to track your rides and calculate distance.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Cardio Tracker needs access to your location to track your rides and calculate distance even when the app is in the background.",
+        "UIBackgroundModes": [
+          "location",
+          "fetch"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +33,18 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.sundaran.cycletracker"
+      "package": "com.sundaran.cycletracker",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBBG8cIUFEmmXmCIFftIATPkTS3kxBL28A"
+        }
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "FOREGROUND_SERVICE",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

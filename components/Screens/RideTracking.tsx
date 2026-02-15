@@ -5,6 +5,7 @@ import { Bike, Settings, Navigation, Plus, Minus, Route, Gauge, Pause, Play, Squ
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useCreateRide, useUpdateRideCoordinates, useEndRide } from '../../hooks/useRides';
+import { startBackgroundTracking, stopBackgroundTracking } from '../../services/LocationTask';
 import { CustomModal } from '../ui/CustomModal';
 
 const { width, height } = Dimensions.get('window');
@@ -95,6 +96,8 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
 
       let initialLocation = await Location.getCurrentPositionAsync({});
       setLocation(initialLocation);
+      
+      // Background tracking initialized in useEffect
     })();
   }, []);
 
@@ -115,10 +118,21 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
 
   // Location tracking logic
   useEffect(() => {
+    // We don't need foreground subscription if we use background service, 
+    // BUT mapped route needs updates. 
+    // We can either listen to AsyncStorage changes (polling) or keep a foreground sub used ONLY for UI updates when app is open.
+    // Keeping foreground sub for UI smoothness, but background task handles notification.
     let subscriber: Location.LocationSubscription | null = null;
 
     if (status === 'active') {
       (async () => {
+        // Start background service
+        try {
+            await startBackgroundTracking();
+        } catch (e) {
+            console.log("Background tracking failed to start", e);
+        }
+
         subscriber = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.BestForNavigation,
@@ -135,7 +149,7 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
               },
             ]);
             
-            // Basic distance calculation (simplified)
+            // basic distance calc for UI (independent of background serving notification)
             if (routeCoordinates.length > 0) {
                 const last = routeCoordinates[routeCoordinates.length - 1];
                 const dist = calculateDistance(
@@ -149,10 +163,16 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
           }
         );
       })();
+    } else {
+        // Stop background service when not active
+        stopBackgroundTracking().catch(console.error);
     }
 
     return () => {
       if (subscriber) subscriber.remove();
+      // We don't stop background tracking here blindly on unmount, 
+      // because we want it to run if the ride is still active.
+      // But if status changes to non-active, the else block above handles it.
     };
   }, [status]);
 
