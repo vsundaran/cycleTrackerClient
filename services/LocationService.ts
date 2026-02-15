@@ -133,6 +133,9 @@ const handleLocationUpdates = async (locations: Location.LocationObject[]) => {
     // Update state
     await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
     
+    // Trigger notification update in background
+    await updateRideNotification();
+    
   } catch (error) {
     console.error('Error in background task:', error);
   }
@@ -252,7 +255,7 @@ export const startBackgroundTracking = async () => {
   await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
     accuracy: Location.Accuracy.BestForNavigation,
     timeInterval: 1000, // Update every second
-    distanceInterval: 5, // Or every 5 meters
+    distanceInterval: 1, // Update every 1 meter to ensure background task triggers often
     foregroundService: {
       notificationTitle: "Cardio Tracker",
       notificationBody: "Tracking your ride...",

@@ -1,13 +1,18 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowLeft, Calendar, Timer, Gauge, Flame, Bolt } from 'lucide-react-native';
+import { ArrowLeft, Calendar, Timer, Gauge, Flame, Bolt, Square } from 'lucide-react-native';
 import MapView, { Polyline } from 'react-native-maps';
-import { useRide } from '../../hooks/useRides';
+import * as Haptics from 'expo-haptics';
+import { useRide, useEndRide } from '../../hooks/useRides';
+import { stopBackgroundTracking } from '../../services/LocationService';
+import { CustomModal } from '../ui/CustomModal';
 
 export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavigate: (screen: string, params?: any) => void, rideId?: string }) {
-  const { data: ride, isLoading } = useRide(rideId);
+  const { data: ride, isLoading, refetch } = useRide(rideId);
+  const endRideMutation = useEndRide();
 
+  const [showStopModal, setShowStopModal] = React.useState(false);
   const mapRef = React.useRef<MapView>(null);
 
   React.useEffect(() => {
@@ -58,6 +63,33 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleStop = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setShowStopModal(true);
+  };
+
+  const confirmStop = async () => {
+    if (!ride) return;
+    setShowStopModal(false);
+
+    try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await stopBackgroundTracking();
+
+      const stats = {
+        distance: dynamicDistance,
+        duration: ride.duration || 0,
+        avgSpeed: ride.avgSpeed || 0,
+        calories: ride.calories || (dynamicDistance * 50),
+      };
+
+      await endRideMutation.mutateAsync({ id: ride._id, stats });
+      refetch(); // Refresh data to show completed status
+    } catch (err) {
+      console.error('Failed to end ride from summary:', err);
+    }
   };
 
   if (isLoading) {
@@ -174,6 +206,19 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
         </View>
 
         <View style={styles.actionSection}>
+          {ride.status === 'active' && (
+            <TouchableOpacity 
+              style={styles.stopActivityBtn} 
+              onPress={handleStop}
+              disabled={endRideMutation.isPending}
+            >
+              <Square size={20} color="#FFFFFF" fill="#FFFFFF" />
+              <Text style={styles.stopActivityBtnText}>
+                {endRideMutation.isPending ? 'Ending...' : 'Stop Activity'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity style={styles.primaryBtn} onPress={() => onNavigate('Activities')}>
             <Text style={styles.primaryBtnText}>View All Activities</Text>
           </TouchableOpacity>
@@ -181,6 +226,15 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
             <Text style={styles.secondaryBtnText}>Back to Dashboard</Text>
           </TouchableOpacity>
         </View>
+
+        <CustomModal
+          isVisible={showStopModal}
+          title="Stop Ride?"
+          message="Are you sure you want to finish your ride and save your progress?"
+          confirmText="Finish"
+          onConfirm={confirmStop}
+          onCancel={() => setShowStopModal(false)}
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -338,5 +392,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#64748b',
+  },
+  stopActivityBtn: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 16,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  stopActivityBtnText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
   },
 });
