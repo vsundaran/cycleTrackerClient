@@ -1,7 +1,7 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, Bike, Edit3, Map as DistanceIcon, Timer, Gauge, Flame, LogOut } from 'lucide-react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useProfile, useUpdateProfile } from '../../hooks/useUser';
 import { useAuth } from '../../context/AuthContext';
 import { Skeleton } from '../ui/Skeleton';
@@ -11,9 +11,16 @@ export default function ProfileHeader({ onNavigate }: { onNavigate: (screen: str
   const [isEditing, setIsEditing] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const { user: authUser, logout } = useAuth();
-  const { data: profile, isLoading } = useProfile();
+  const { data: profile, isLoading, refetch } = useProfile();
   const updateProfileMutation = useUpdateProfile();
   const [name, setName] = useState(authUser?.name || 'Alex Rivera');
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  }, [refetch]);
 
   // Sync state with profile data when it loads
   useEffect(() => {
@@ -77,7 +84,13 @@ export default function ProfileHeader({ onNavigate }: { onNavigate: (screen: str
         <View style={{ width: 48 }} />
       </View>
 
-      <ScrollView style={styles.main} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.main}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#4ade80']} tintColor="#4ade80" />
+        }
+      >
         {/* Profile Section */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>

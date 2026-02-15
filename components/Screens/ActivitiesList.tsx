@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, FlatList, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, Bike, Plus } from 'lucide-react-native';
 import { useRides, Ride } from '../../hooks/useRides';
@@ -10,7 +10,14 @@ import { AnimatedPressable } from '../../animations/components/AnimatedPressable
 import { RideRouteMap } from '../ui/RideRouteMap';
 
 export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: string, params?: any) => void }) {
-  const { data: rides, isLoading } = useRides();
+  const { data: rides, isLoading, refetch } = useRides();
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  }, [refetch]);
 
   // Calculate Monthly Summary and Growth
   const { monthlySummary, growthPercent } = React.useMemo(() => {
@@ -67,7 +74,7 @@ export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: st
     <AnimatedCard 
       style={styles.activityCard} 
       index={index}
-      onPress={() => onNavigate('RideSummary', { rideId: item._id })}
+      onPress={() => onNavigate(item.status === 'active' ? 'ActiveRide' : 'RideSummary', { rideId: item._id })}
     >
       <View style={[styles.cardIndicator, { backgroundColor: item.status === 'active' ? '#ef4444' : '#4ade80' }]} />
       <View style={styles.cardContent}>
@@ -139,6 +146,9 @@ export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: st
              {[1,2,3].map(i => <View key={i} style={{ marginHorizontal: 16 }}><Skeleton height={110} borderRadius={16} /></View>)}
           </View>
         ) : null}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#4ade80']} tintColor="#4ade80" />
+        }
         ListHeaderComponent={() => (
           <View style={styles.listHeader}>
             <View style={styles.summarySection}>

@@ -5,11 +5,12 @@ import { Bike, Settings, Navigation, Plus, Minus, Route, Gauge, Pause, Play, Squ
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
-import { useCreateRide, useUpdateRideCoordinates, useEndRide } from '../../hooks/useRides';
-import { startBackgroundTracking, stopBackgroundTracking, initBackgroundFetch, checkForActiveRide } from '../../services/LocationService';
+import { useRide, useCreateRide, useUpdateRideCoordinates, useEndRide } from '../../hooks/useRides';
+import { startBackgroundTracking, stopBackgroundTracking, initBackgroundFetch, checkForActiveRide, getRideState, updateRideStateLocally, pauseBackgroundTracking, resumeBackgroundTracking } from '../../services/LocationService';
 import { registerNotificationActionHandler, unregisterNotificationActionHandler, initNotificationResponseListener } from '../../services/NotificationHandler';
 import { requestAllPermissions } from '../../services/PermissionService';
 import { CustomModal } from '../ui/CustomModal';
+import { useRideStore } from '../../store/useRideStore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -58,25 +59,32 @@ const MemoizedMap = React.memo(({
     </MapView>
   );
 }, (prev, next) => {
-  // Only re-render if status changes or coordinates length changes significantly
-  // (We sync every 5 points, so we can also optimize redraw here)
   return (
     prev.status === next.status && 
     prev.routeCoordinates.length === next.routeCoordinates.length
   );
 });
 
-export default function RideTracking({ onNavigate }: { onNavigate: (screen: string) => void }) {
-  const [status, setStatus] = useState<RideStatus>('not_started');
-  const [rideId, setRideId] = useState<string | null>(null);
-  const [showStopModal, setShowStopModal] = useState(false);
-  const [seconds, setSeconds] = useState(0);
-  const [location, setLocation] = useState<Location.LocationObject | null>(null);
-  const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
-  const [distance, setDistance] = useState(0);
-  const [currentSpeed, setCurrentSpeed] = useState(0);
-  const lastLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+export default function RideTracking({ onNavigate, rideId: initialRideId }: { onNavigate: (screen: string, params?: any) => void, rideId?: string }) {
+  const { 
+    status, 
+    rideId, 
+    distance, 
+    startTime, 
+    routeCoordinates, 
+    currentSpeed,
+    startRide,
+    pauseRide,
+    resumeRide,
+    stopRide,
+    updateTrackingData,
+    resetRide
+  } = useRideStore();
 
+  const [showStopModal, setShowStopModal] = useState(false);
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  
   const createRideMutation = useCreateRide();
   const updateCoordsMutation = useUpdateRideCoordinates();
   const endRideMutation = useEndRide();
@@ -90,50 +98,71 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
   const mapRef = useRef<MapView>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Sync elapsed seconds based on startTime
+  useEffect(() => {
+    if (status === 'active' && startTime) {
+      const updateTimer = () => {
+        const now = Date.now();
+        const diff = Math.floor((now - startTime) / 1000);
+        setElapsedSeconds(diff);
+      };
+
+      updateTimer(); // Initial call
+      timerRef.current = setInterval(updateTimer, 1000);
+    } else if (status === 'paused' && startTime) {
+        // Just show current elapsed time if paused
+        const now = Date.now();
+        const diff = Math.floor((now - startTime) / 1000);
+        setElapsedSeconds(diff);
+        if (timerRef.current) clearInterval(timerRef.current);
+    } else {
+      setElapsedSeconds(0);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [status, startTime]);
+
   // Initial location request and notification setup
   useEffect(() => {
     (async () => {
       // 1. Check/Request Permissions
       const perms = await requestAllPermissions();
-      if (!perms.foregroundLocation) {
-        // Handle denial if needed, but PermissionService already showed alert
-        return;
-      }
+      if (!perms.foregroundLocation) return;
 
       let initialLocation = await Location.getCurrentPositionAsync({});
       setLocation(initialLocation);
-      
       await initBackgroundFetch();
       
-      // 2. Check for active ride (recovery from kill)
-      const savedState = await checkForActiveRide();
-      if (savedState && savedState.isActive) {
-        // Resume UI state
-        setStatus(savedState.isPaused ? 'paused' : 'active');
-        setDistance(savedState.totalDistance);
-        
-        // Restore timer
-        const now = Date.now();
-        const durationSec = Math.floor((now - savedState.startTime) / 1000);
-        setSeconds(durationSec);
-        
-        // We need to fetch the ride ID from somewhere if we want to sync properly.
-        // For now, we might assume the notification action handles the critical "Stop" 
-        // even if we don't have the rideId in UI state immediately.
-        // ideally LocationService should store rideId too.
-        // For this iteration, we'll focus on visual recovery.
+      // If we have an active ride in store, animate to it
+      if (status !== 'not_started' && routeCoordinates.length > 0) {
+          const lastCoord = routeCoordinates[routeCoordinates.length - 1];
+          const initialRegion = {
+              latitude: lastCoord.latitude,
+              longitude: lastCoord.longitude,
+              latitudeDelta: 0.005,
+              longitudeDelta: 0.005,
+          };
+          setRegion(initialRegion);
+          setTimeout(() => {
+            mapRef.current?.animateToRegion(initialRegion, 1000);
+          }, 500);
+      } else if (initialLocation) {
+          const initialRegion = {
+              latitude: initialLocation.coords.latitude,
+              longitude: initialLocation.coords.longitude,
+              latitudeDelta: 0.005,
+              longitudeDelta: 0.005,
+          };
+          setRegion(initialRegion);
       }
 
       // Initialize notification response listener
       const subscription = initNotificationResponseListener();
+      registerNotificationActionHandler(() => onNavigate('RideSummary'));
       
-      // Register handler for notification actions
-      registerNotificationActionHandler(() => {
-        // Navigate to summary when stop is pressed from notification
-        onNavigate('RideSummary');
-      });
-      
-      // Cleanup on unmount
       return () => {
         subscription?.remove();
         unregisterNotificationActionHandler();
@@ -141,111 +170,90 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
     })();
   }, [onNavigate]);
 
-  // Timer logic
+  // Location tracking logic (Foreground sync)
   useEffect(() => {
-    if (status === 'active') {
-      timerRef.current = setInterval(() => {
-        setSeconds((prev) => prev + 1);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [status]);
-
-  // Location tracking logic
-  useEffect(() => {
-    // We don't need foreground subscription if we use background service, 
-    // BUT mapped route needs updates. 
-    // We can either listen to AsyncStorage changes (polling) or keep a foreground sub used ONLY for UI updates when app is open.
-    // Keeping foreground sub for UI smoothness, but background task handles notification.
     let subscriber: Location.LocationSubscription | null = null;
 
     if (status === 'active') {
       (async () => {
-        // Start background service
         try {
-            await startBackgroundTracking();
+            if (rideId) {
+                await startBackgroundTracking(rideId);
+            }
         } catch (e) {
-            console.log("Background tracking failed to start", e);
+            console.log("Background tracking notification failed", e);
         }
 
         subscriber = await Location.watchPositionAsync(
           {
             accuracy: Location.Accuracy.BestForNavigation,
             timeInterval: 1000,
-            distanceInterval: 2, // Reduced for more frequent updates
+            distanceInterval: 1,
           },
           (newLocation) => {
             setLocation(newLocation);
             
-            // Calculate speed (convert m/s to km/h)
-            // Ensure speed is non-negative. location.coords.speed is -1 if invalid
+            const newCoord = {
+                latitude: newLocation.coords.latitude,
+                longitude: newLocation.coords.longitude,
+            };
+
             const speedKmh = (newLocation.coords.speed && newLocation.coords.speed > 0) 
               ? newLocation.coords.speed * 3.6 
               : 0;
-            setCurrentSpeed(speedKmh);
 
-            setRouteCoordinates((prev) => [
-              ...prev,
-              {
-                latitude: newLocation.coords.latitude,
-                longitude: newLocation.coords.longitude,
-              },
-            ]);
+            // Update store from foreground
+            // Note: Background service also updates this, but foreground keeps it snappy
+            const currentStore = useRideStore.getState();
+            let newDistance = currentStore.distance;
             
-            // Calculate distance using Ref to avoid stale closure
-            if (lastLocationRef.current) {
-                const dist = calculateDistance(
-                    lastLocationRef.current.latitude,
-                    lastLocationRef.current.longitude,
+            if (currentStore.lastLocation) {
+                const step = calculateDistance(
+                    currentStore.lastLocation.latitude,
+                    currentStore.lastLocation.longitude,
                     newLocation.coords.latitude,
                     newLocation.coords.longitude
                 );
-                // Only add distance if it's reasonable (e.g. > 2 meters to avoid noise)
-                if (dist > 0.002) {
-                     setDistance(prev => prev + dist);
+                // step comes back in METERS from LocationService.ts's logic? 
+                // Wait, RideTracking's calculateDistance was KM, LocationService's was METERS.
+                // Let's standardize to METERS for calculation.
+                if (step > 2) { 
+                     newDistance += step / 1000;
                 }
             }
-            
-            // Update last location ref
-            lastLocationRef.current = {
-                latitude: newLocation.coords.latitude,
-                longitude: newLocation.coords.longitude
-            };
+
+            updateTrackingData({
+                distance: newDistance,
+                lastLocation: newCoord,
+                routeCoordinates: [...currentStore.routeCoordinates, newCoord],
+                currentSpeed: speedKmh,
+            });
           }
         );
       })();
-    } else {
-        // Stop background service when not active
-        stopBackgroundTracking().catch(console.error);
     }
 
     return () => {
       if (subscriber) subscriber.remove();
     };
-  }, [status]);
+  }, [status, rideId]);
 
-  // Sync coordinates to backend effect
+  // Sync coordinates to backend
   useEffect(() => {
     if (status === 'active' && rideId && routeCoordinates.length > 0) {
-      const lastCoord = routeCoordinates[routeCoordinates.length - 1];
-      // Sync every 5 points to minimize noise but keep state fresh
       if (routeCoordinates.length % 5 === 0) {
+        const lastCoord = routeCoordinates[routeCoordinates.length - 1];
         updateCoordsMutation.mutate({ 
           id: rideId, 
           coordinates: [{ ...lastCoord, timestamp: new Date() }] 
         });
       }
     }
-  }, [routeCoordinates.length]);
+  }, [routeCoordinates.length, status, rideId]);
 
 
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371; // km
+    const R = 6371000; // meters
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = 
@@ -272,12 +280,14 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
   };
 
   const handleStart = async () => {
+    if (status !== 'not_started') return;
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       const dynamicName = getDynamicRideName();
       const newRide = await createRideMutation.mutateAsync(dynamicName);
-      setRideId(newRide._id);
-      setStatus('active');
+      
+      startRide(newRide._id);
+      await startBackgroundTracking(newRide._id);
     } catch (err) {
       console.error('Failed to start ride:', err);
     }
@@ -285,7 +295,13 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
 
   const handlePause = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setStatus(status === 'active' ? 'paused' : 'active');
+    if (status === 'active') {
+        pauseRide();
+        await pauseBackgroundTracking();
+    } else {
+        resumeRide();
+        await resumeBackgroundTracking();
+    }
   };
 
   const confirmStop = async () => {
@@ -294,17 +310,17 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
 
     try {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      // Stop background tracking first
       await stopBackgroundTracking();
       
       const stats = {
         distance,
-        duration: seconds,
-        avgSpeed: seconds > 0 ? (distance / (seconds / 3600)) : 0,
+        duration: elapsedSeconds,
+        avgSpeed: elapsedSeconds > 0 ? (distance / (elapsedSeconds / 3600)) : 0,
         calories: distance * 50,
       };
 
       await endRideMutation.mutateAsync({ id: rideId, stats });
+      stopRide();
       onNavigate('RideSummary');
     } catch (err) {
       console.error('Failed to end ride:', err);
@@ -343,8 +359,6 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
   };
 
 
-  const avgSpeed = seconds > 0 ? (distance / (seconds / 3600)) : 0;
-
   return (
     <View style={styles.container}>
       <CustomModal
@@ -368,10 +382,10 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
 
       {/* Map Content Area */}
       <View style={styles.main}>
-        {location ? (
+        {location || routeCoordinates.length > 0 ? (
           <MemoizedMap
             mapRef={mapRef}
-            initialLocation={location}
+            initialLocation={location || { coords: routeCoordinates[routeCoordinates.length - 1], timestamp: Date.now() } as any}
             routeCoordinates={routeCoordinates}
             status={status}
             onRegionChangeComplete={setRegion}
@@ -403,7 +417,7 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
             {/* Timer */}
             <View style={styles.timerSection}>
               <Text style={styles.statLabel}>DURATION</Text>
-              <Text style={styles.timerValue}>{formatTime(seconds)}</Text>
+              <Text style={styles.timerValue}>{formatTime(elapsedSeconds)}</Text>
             </View>
 
             {/* Metrics Grid */}

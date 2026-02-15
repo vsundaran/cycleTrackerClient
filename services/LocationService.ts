@@ -13,12 +13,13 @@ Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldPlaySound: false,
     shouldSetBadge: false,
-    shouldShowBanner: true,
+    shouldShowBanner: false,
     shouldShowList: true,
   }),
 });
 
 export interface RideState {
+  rideId: string;
   startTime: number;
   totalDistance: number; // in meters
   lastLocation: { latitude: number; longitude: number } | null;
@@ -28,6 +29,7 @@ export interface RideState {
   lastUpdateTime: number;
   lastMovementTime: number;
   currentSpeed: number; // in m/s
+  route: { latitude: number; longitude: number }[];
 }
 
 // Notification update timer reference
@@ -54,9 +56,10 @@ export const initBackgroundFetch = async () => {
 
   // Setup notification channel for Android
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('ride-tracking', {
-      name: 'Ride Tracking',
-      importance: Notifications.AndroidImportance.LOW, // LOW to suppress sound and vibration
+    // Using a new ID 'ride-tracking-silent' to ensure settings take effect immediately
+    await Notifications.setNotificationChannelAsync('ride-tracking-silent', {
+      name: 'Ride Tracking (Silent)',
+      importance: Notifications.AndroidImportance.MIN, // MIN to strictly prevent sound, vibration, and peeking
       vibrationPattern: null,
       lightColor: '#4ade80',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -80,58 +83,63 @@ export const initBackgroundFetch = async () => {
 
 
 
+import { useRideStore } from '../store/useRideStore';
+
 /**
  * Handle location updates from background task
  */
 const handleLocationUpdates = async (locations: Location.LocationObject[]) => {
   try {
-    const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
-    if (!stateStr) return;
-
-    let state: RideState = JSON.parse(stateStr);
+    const state = useRideStore.getState();
     
-    if (!state.isActive || state.isPaused) return;
+    if (state.status !== 'active') return;
 
     const now = Date.now();
-    state.lastUpdateTime = now;
-    state.gpsSignalLost = false; // We got an update, so GPS is working
+    let { distance, routeCoordinates, lastLocation } = state;
+    let currentSpeed = 0;
 
     locations.forEach(loc => {
       // Update current speed (ensure non-negative, -1 means unavailable)
-      state.currentSpeed = (loc.coords.speed !== null && loc.coords.speed >= 0) 
-        ? loc.coords.speed 
+      currentSpeed = (loc.coords.speed !== null && loc.coords.speed >= 0) 
+        ? loc.coords.speed * 3.6 // Convert to km/h
         : 0;
 
       // Check if user is moving (speed > 0.5 m/s = ~1.8 km/h)
       const isMoving = loc.coords.speed !== null && loc.coords.speed > 0.5;
 
       if (isMoving) {
-        state.lastMovementTime = now;
-
         // Calculate distance only when moving
-        if (state.lastLocation) {
-          const dist = calculateDistance(
-            state.lastLocation.latitude,
-            state.lastLocation.longitude,
+        if (lastLocation) {
+          const distMeters = calculateDistance(
+            lastLocation.latitude,
+            lastLocation.longitude,
             loc.coords.latitude,
             loc.coords.longitude
           );
           
           // Filter noise: only add distance if > 2 meters
-          if (dist > 2) {
-            state.totalDistance += dist;
+          if (distMeters > 2) {
+            distance += distMeters / 1000; // Convert to km
           }
         }
         
-        state.lastLocation = { 
+        lastLocation = { 
           latitude: loc.coords.latitude, 
           longitude: loc.coords.longitude 
         };
+
+        // Persist route
+        routeCoordinates.push(lastLocation);
       }
     });
 
-    // Update state
-    await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
+    // Update global store
+    useRideStore.getState().updateTrackingData({
+      distance,
+      routeCoordinates: [...routeCoordinates],
+      lastLocation,
+      currentSpeed,
+    });
     
     // Trigger notification update in background
     await updateRideNotification();
@@ -146,15 +154,11 @@ const handleLocationUpdates = async (locations: Location.LocationObject[]) => {
  */
 const updateRideNotification = async () => {
   try {
-    const state = await getRideState();
-    if (!state || !state.isActive) return;
+    const state = useRideStore.getState();
+    if (state.status === 'not_started' || !state.startTime) return;
 
     const now = Date.now();
     
-    // Check for GPS signal loss (no updates for 10+ seconds)
-    const timeSinceLastUpdate = now - state.lastUpdateTime;
-    const gpsLost = timeSinceLastUpdate > 10000;
-
     // Calculate duration
     const durationMs = now - state.startTime;
     const durationSec = Math.floor(durationMs / 1000);
@@ -163,13 +167,11 @@ const updateRideNotification = async () => {
     const seconds = durationSec % 60;
     
     const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    const distanceKm = (state.totalDistance / 1000).toFixed(2);
-    const speedKmh = (state.currentSpeed * 3.6).toFixed(1); // Convert m/s to km/h
+    const distanceKm = state.distance.toFixed(2);
+    const speedKmh = state.currentSpeed.toFixed(1);
     
     let bodyText: string;
-    if (gpsLost) {
-      bodyText = `⏱️ ${timeStr} • 📍 Waiting for GPS...`;
-    } else if (state.isPaused) {
+    if (state.status === 'paused') {
       bodyText = `⏱️ ${timeStr} • 📏 ${distanceKm} km • 🏃 ${speedKmh} km/h (Paused)`;
     } else {
       bodyText = `⏱️ ${timeStr} • 📏 ${distanceKm} km • 🏃 ${speedKmh} km/h`;
@@ -178,25 +180,22 @@ const updateRideNotification = async () => {
     await Notifications.scheduleNotificationAsync({
       identifier: NOTIFICATION_ID,
       content: {
-        title: state.isPaused ? '⏸️ Ride Paused' : '🚴 Ride Active',
+        title: state.status === 'paused' ? '⏸️ Ride Paused' : '🚴 Ride Active',
         body: bodyText,
         sticky: true,
         autoDismiss: false,
         color: '#4ade80',
-        priority: Notifications.AndroidNotificationPriority.LOW,
+        priority: Notifications.AndroidNotificationPriority.MIN,
         sound: false,
-        vibrate: [0, 0, 0, 0] as any, // Explicitly disable vibration
+        vibrate: null as any,
         categoryIdentifier: 'ride-active',
+        // @ts-ignore
+        channelId: 'ride-tracking-silent',
         data: { rideId: 'current' },
       },
       trigger: null,
     });
 
-    // Update GPS signal lost flag if changed
-    if (gpsLost !== state.gpsSignalLost) {
-      state.gpsSignalLost = gpsLost;
-      await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
-    }
   } catch (error) {
     console.error('Error updating notification:', error);
   }
@@ -221,6 +220,29 @@ const startNotificationUpdateTimer = () => {
 };
 
 /**
+ * Update the ride state manually from the foreground
+ */
+export const updateRideStateLocally = async (updates: Partial<RideState>) => {
+  try {
+    const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
+    if (!stateStr) return;
+
+    let state: RideState = JSON.parse(stateStr);
+    
+    // Apply updates
+    Object.assign(state, updates);
+    state.lastUpdateTime = Date.now();
+
+    await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
+    
+    // Update notification to reflect manual changes
+    await updateRideNotification();
+  } catch (error) {
+    console.error('Error updating ride state locally:', error);
+  }
+};
+
+/**
  * Stop the notification update timer
  */
 const stopNotificationUpdateTimer = () => {
@@ -233,14 +255,22 @@ const stopNotificationUpdateTimer = () => {
 /**
  * Start background location tracking
  */
-export const startBackgroundTracking = async () => {
+export const startBackgroundTracking = async (rideId: string) => {
   const { status } = await Location.requestBackgroundPermissionsAsync();
   if (status !== 'granted') {
     throw new Error('Background location permission denied');
   }
 
+  // Check if we already have an active session for this rideId
+  const existingState = await getRideState();
+  if (existingState && existingState.rideId === rideId && existingState.isActive) {
+    console.log('Preserving existing active session state for rideId:', rideId);
+    return;
+  }
+
   // Initial state
   const initialState: RideState = {
+    rideId,
     startTime: Date.now(),
     totalDistance: 0,
     lastLocation: null,
@@ -250,6 +280,7 @@ export const startBackgroundTracking = async () => {
     lastUpdateTime: Date.now(),
     lastMovementTime: Date.now(),
     currentSpeed: 0,
+    route: [],
   };
   await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(initialState));
 
@@ -293,30 +324,19 @@ export const stopBackgroundTracking = async () => {
 };
 
 /**
- * Pause background tracking (timer continues, distance stops)
+ * Pause background tracking visibility/notification
  */
 export const pauseBackgroundTracking = async () => {
-  const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
-  if (stateStr) {
-    const state: RideState = JSON.parse(stateStr);
-    state.isPaused = true;
-    await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
-    await updateRideNotification(); // Update notification to show paused state
-  }
+  await updateRideNotification();
 };
 
 /**
- * Resume background tracking
+ * Resume background tracking visibility/notification
  */
 export const resumeBackgroundTracking = async () => {
-  const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
-  if (stateStr) {
-    const state: RideState = JSON.parse(stateStr);
-    state.isPaused = false;
-    await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
-    await updateRideNotification(); // Update notification to show active state
-  }
+  await updateRideNotification();
 };
+
 
 /**
  * Get current ride state

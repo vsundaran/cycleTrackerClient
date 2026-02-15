@@ -1,20 +1,41 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, ImageBackground } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, ImageBackground, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Bike, Flame, Map as MapIcon, Timer, Gauge, ArrowRight } from 'lucide-react-native';
 import { useRides } from '../../hooks/useRides';
 import { useProfile } from '../../hooks/useUser';
 import { useAuth } from '../../context/AuthContext';
+import { getRideState } from '../../services/LocationService';
 import { Skeleton } from '../ui/Skeleton';
 import { NoActivityCard } from '../ui/NoActivityCard';
 import { AnimatedCard } from '../../animations/components/AnimatedCard';
 import { AnimatedPressable } from '../../animations/components/AnimatedPressable';
 import { RideRouteMap } from '../ui/RideRouteMap';
 
+import { useRideStore } from '../../store/useRideStore';
+
 export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: string, params?: any) => void }) {
   const { user: authUser } = useAuth();
-  const { data: profile, isLoading: isProfileLoading } = useProfile();
-  const { data: rides, isLoading: isRidesLoading } = useRides();
+  const { data: profile, isLoading: isProfileLoading, refetch: refetchProfile } = useProfile();
+  const { data: rides, isLoading: isRidesLoading, refetch: refetchRides } = useRides();
+  const { status: localStatus, rideId: localRideId } = useRideStore();
+  const [refreshing, setRefreshing] = useState(false);
+  
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([refetchProfile(), refetchRides()]);
+    setRefreshing(false);
+  }, [refetchProfile, refetchRides]);
+
+  // Refresh data on mount to ensure we have the latest state
+  useEffect(() => {
+    refetchRides();
+  }, [refetchRides]);
+
+  const activeRide = rides?.find(ride => ride.status === 'active');
+  // Local store is now the primary source of truth for active session in foreground
+  const hasActiveRide = localStatus !== 'not_started' || !!activeRide;
+
 
   const lastRides = rides ? rides.slice(0, 2) : [];
   const stats = profile?.lifetimeStats || {
@@ -49,6 +70,9 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
         style={styles.main} 
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#4ade80']} tintColor="#4ade80" />
+        }
       >
         {/* Stats Section */}
         <View style={styles.statsGrid}>
@@ -111,20 +135,29 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
           </AnimatedCard>
         </View>
 
-        {/* Start New Ride Button */}
-        <AnimatedPressable 
-          style={styles.ctaButton} 
-          scaleActive={0.96}
-          onPress={() => onNavigate('NewRide')}
-        >
-          <View style={styles.ctaContent}>
-            <View style={styles.ctaIconBg}>
-              <Bike size={24} color="#FFFFFF" />
+        {/* Start New Ride Button - Only shown when no active ride exists */}
+        {isRidesLoading ? (
+            <View style={{ marginTop: 32 }}>
+                <Skeleton height={80} borderRadius={16} />
             </View>
-            <Text style={styles.ctaText}>Start New Ride</Text>
-          </View>
-          <ArrowRight size={24} color="#122017" />
-        </AnimatedPressable>
+        ) : !hasActiveRide && (
+          <AnimatedPressable 
+            style={styles.ctaButton} 
+            scaleActive={0.96}
+            onPress={() => onNavigate('NewRide')}
+          >
+            <View style={styles.ctaContent}>
+              <View style={styles.ctaIconBg}>
+                <Bike size={24} color="#FFFFFF" />
+              </View>
+              <Text style={styles.ctaText}>Start New Ride</Text>
+            </View>
+            <ArrowRight size={24} color="#122017" />
+          </AnimatedPressable>
+        )}
+        
+        {/* Optional: Add a "Current Session" header or small indicator if needed, 
+            but for now we'll rely on the Live Tracking card below. */}
 
         {/* Activity Preview */}
         <View style={styles.lastActivitySection}>
@@ -143,7 +176,7 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
                 <AnimatedCard 
                   key={ride._id || index} 
                   index={index + 4} // Stagger after stats
-                  onPress={() => onNavigate('RideSummary', { rideId: ride._id })}
+                  onPress={() => onNavigate(ride.status === 'active' ? 'ActiveRide' : 'RideSummary', { rideId: ride._id })}
                   style={{ borderRadius: 16, overflow: 'hidden', height: 128, backgroundColor: '#f1f5f9' }}
                 >
                   {ride.status === 'active' ? (
@@ -302,6 +335,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#122017',
+  },
+  activeCtaButton: {
+    backgroundColor: '#122017',
+    borderColor: '#4ade80',
+    borderWidth: 1,
+    shadowColor: '#000',
+  },
+  activeCtaIconBg: {
+    backgroundColor: 'rgba(74, 222, 128, 0.1)',
+  },
+  activeCtaText: {
+    color: '#4ade80',
   },
   lastActivitySection: {
     marginTop: 32,

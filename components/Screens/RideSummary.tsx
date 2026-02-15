@@ -1,28 +1,59 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, Calendar, Timer, Gauge, Flame, Bolt, Square } from 'lucide-react-native';
 import MapView, { Polyline } from 'react-native-maps';
 import * as Haptics from 'expo-haptics';
 import { useRide, useEndRide } from '../../hooks/useRides';
-import { stopBackgroundTracking } from '../../services/LocationService';
+import { stopBackgroundTracking, getRideState } from '../../services/LocationService';
 import { CustomModal } from '../ui/CustomModal';
 
 export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavigate: (screen: string, params?: any) => void, rideId?: string }) {
   const { data: ride, isLoading, refetch } = useRide(rideId);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  }, [refetch]);
   
-  // Refetch data every 5 seconds if the ride is still active
+  const [liveStats, setLiveStats] = React.useState({ duration: 0, distance: 0, avgSpeed: 0, calories: 0 });
+
+  // Refetch data every 5 seconds if the ride is still active (for route syncing)
+  // AND setup 1-second interval for UI live stats
   React.useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
+    let serverInterval: NodeJS.Timeout | null = null;
+    let liveInterval: NodeJS.Timeout | null = null;
     
     if (ride?.status === 'active') {
-      interval = setInterval(() => {
+      // Sync with server every 5 seconds for map/official state
+      serverInterval = setInterval(() => {
         refetch();
       }, 5000);
+
+      // Local live updates every 1 second
+      liveInterval = setInterval(async () => {
+        const localState = await getRideState();
+        if (localState && localState.rideId === (rideId === 'latest' ? localState.rideId : rideId)) {
+          const now = Date.now();
+          const duration = Math.floor((now - localState.startTime) / 1000);
+          const distanceKm = localState.totalDistance / 1000;
+          const avgSpeed = duration > 0 ? (distanceKm / (duration / 3600)) : 0;
+          
+          setLiveStats({
+            duration,
+            distance: distanceKm,
+            avgSpeed,
+            calories: distanceKm * 50
+          });
+        }
+      }, 1000);
     }
     
     return () => {
-      if (interval) clearInterval(interval);
+      if (serverInterval) clearInterval(serverInterval);
+      if (liveInterval) clearInterval(liveInterval);
     };
   }, [ride?.status, refetch]);
 
@@ -67,17 +98,27 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
     return totalDist;
   };
 
-  const dynamicDistance = React.useMemo(() => {
+  const fallbackDistance = React.useMemo(() => {
     if (!ride) return 0;
     // If ride has distance, use it. Otherwise calculate from route.
     if (ride.distance && ride.distance > 0) return ride.distance;
     return calculateTotalDistance(ride.route);
   }, [ride]);
 
+  const currentDistance = ride?.status === 'active' && liveStats.distance > 0 ? liveStats.distance : fallbackDistance;
+  const currentDuration = ride?.status === 'active' && liveStats.duration > 0 ? liveStats.duration : (ride?.duration || 0);
+  const currentAvgSpeed = ride?.status === 'active' && liveStats.avgSpeed > 0 ? liveStats.avgSpeed : (ride?.avgSpeed || 0);
+  const currentCalories = ride?.status === 'active' && liveStats.calories > 0 ? liveStats.calories : (ride?.calories || 0);
+
   const formatDuration = (seconds?: number) => {
     if (!seconds) return '00:00';
-    const mins = Math.floor(seconds / 60);
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
+    
+    if (hrs > 0) {
+      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
@@ -95,10 +136,10 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
       await stopBackgroundTracking();
 
       const stats = {
-        distance: dynamicDistance,
-        duration: ride.duration || 0,
-        avgSpeed: ride.avgSpeed || 0,
-        calories: ride.calories || (dynamicDistance * 50),
+        distance: currentDistance,
+        duration: currentDuration,
+        avgSpeed: currentAvgSpeed,
+        calories: currentCalories,
       };
 
       await endRideMutation.mutateAsync({ id: ride._id, stats });
@@ -141,6 +182,9 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
         style={styles.main} 
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 40 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#4ade80']} tintColor="#4ade80" />
+        }
       >
         <View style={styles.mapContainer}>
           <View style={styles.mapWrapper}>
@@ -167,12 +211,12 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
         <View style={styles.primaryMetricCard}>
           <Text style={styles.primaryLabel}>TOTAL DISTANCE</Text>
           <Text style={styles.primaryValue}>
-            {dynamicDistance.toFixed(2)} <Text style={styles.primaryUnit}>KM</Text>
+            {currentDistance.toFixed(2)} <Text style={styles.primaryUnit}>KM</Text>
           </Text>
           <View style={styles.dateSection}>
             <Calendar size={14} color="#64748b" />
             <Text style={styles.dateText}>
-              {new Date(ride.startTime).toLocaleDateString(undefined, { 
+              {ride.status === 'active' ? 'NOW' : new Date(ride.startTime).toLocaleDateString(undefined, { 
                 weekday: 'long', 
                 year: 'numeric', 
                 month: 'long', 
@@ -190,7 +234,7 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
               </View>
               <Text style={styles.statLabel}>DURATION</Text>
             </View>
-            <Text style={styles.statValue}>{formatDuration(ride.duration)}</Text>
+            <Text style={styles.statValue}>{formatDuration(currentDuration)}</Text>
           </View>
           <View style={styles.statItem}>
             <View style={styles.statHeader}>
@@ -200,7 +244,7 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
               <Text style={styles.statLabel}>AVG SPEED</Text>
             </View>
             <Text style={styles.statValue}>
-              {ride.avgSpeed?.toFixed(1) || '0.0'} <Text style={styles.statUnit}>km/h</Text>
+              {currentAvgSpeed.toFixed(1)} <Text style={styles.statUnit}>km/h</Text>
             </Text>
           </View>
           <View style={styles.statItem}>
@@ -211,7 +255,7 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
               <Text style={styles.statLabel}>CALORIES</Text>
             </View>
             <Text style={styles.statValue}>
-              {Math.round(ride.calories || 0)} <Text style={styles.statUnit}>kcal</Text>
+              {Math.round(currentCalories)} <Text style={styles.statUnit}>kcal</Text>
             </Text>
           </View>
           <View style={styles.statItem}>
