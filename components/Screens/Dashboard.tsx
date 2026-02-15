@@ -9,6 +9,7 @@ import { Skeleton } from '../ui/Skeleton';
 import { NoActivityCard } from '../ui/NoActivityCard';
 import { AnimatedCard } from '../../animations/components/AnimatedCard';
 import { AnimatedPressable } from '../../animations/components/AnimatedPressable';
+import { RideRouteMap } from '../ui/RideRouteMap';
 
 export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: string) => void }) {
   const { user: authUser } = useAuth();
@@ -129,7 +130,7 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
               <Text style={styles.seeAllText}>See all</Text>
             </AnimatedPressable>
           </View>
-          
+        
           {isRidesLoading ? (
             <Skeleton height={128} borderRadius={16} />
           ) : lastRides.length > 0 ? (
@@ -139,21 +140,17 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
                   key={ride._id || index} 
                   index={index + 4} // Stagger after stats
                   onPress={() => onNavigate('RideSummary')}
-                  style={{ borderRadius: 16, overflow: 'hidden' }}
+                  style={{ borderRadius: 16, overflow: 'hidden', height: 128, backgroundColor: '#f1f5f9' }}
                 >
-                  <ImageBackground
-                    source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBg-W1xXT6mT1I0lOGCWWEUpKTjPB9PR9wIJP7tk7gQMls7erui8M2niwaB34XyZ0H-wDzewjs0pmVi5DIVHyWOqhpHsRvTfPQRfLQoQ8FEfRoQ3gDdLKErcbatBUxdiwl0w4V_kAQ3dIpFmm72uQDwXgfj-P_x4MbRw7tyAy7o8q_bTdk66n0EoQnVfJdIVOWwcuxAGdYlLAZsbm1GUmAwgqsjZLNTVqEub0iYAg6BHcv1xEDWm9DAdPhuqOwTvL87Qdqc6iRunGep' }}
-                    style={styles.activityCard}
-                    imageStyle={{ borderRadius: 12, opacity: 0.7 }}
-                  >
-                    <View style={styles.activityOverlay} />
-                    <View style={styles.activityInfo}>
-                      <Text style={styles.activityDate}>
-                        {new Date(ride.startTime).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
-                      </Text>
-                      <Text style={styles.activityName}>{ride.title}</Text>
-                    </View>
-                  </ImageBackground>
+                  {/* @ts-ignore */}
+                  <RideRouteMap route={ride.route} style={StyleSheet.absoluteFillObject} />
+                  <View style={styles.activityOverlay} />
+                  <View style={styles.activityInfo}>
+                    <Text style={styles.activityDate}>
+                      {new Date(ride.startTime).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                    </Text>
+                    <Text style={styles.activityName}>{ride.title}</Text>
+                  </View>
                 </AnimatedCard>
               ))}
             </View>
@@ -312,20 +309,19 @@ const styles = StyleSheet.create({
     color: '#4ade80',
   },
   activityCard: {
-    width: '100%',
-    height: 128,
-    borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: '#f1f5f9',
-    justifyContent: 'flex-end',
-    padding: 16,
+    // Removed specific activityCard style as it's now handled by AnimatedCard container + absolute children
   },
   activityOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.3)',
+    zIndex: 1,
   },
   activityInfo: {
-    zIndex: 1,
+    zIndex: 2,
+    position: 'absolute',
+    bottom: 16,
+    left: 16,
+    right: 16,
   },
   activityDate: {
     fontSize: 12,

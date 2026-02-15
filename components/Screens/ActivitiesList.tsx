@@ -7,47 +7,7 @@ import { Skeleton } from '../ui/Skeleton';
 import { NoActivityCard } from '../ui/NoActivityCard';
 import { AnimatedCard } from '../../animations/components/AnimatedCard';
 import { AnimatedPressable } from '../../animations/components/AnimatedPressable';
-
-const dummyActivities = [
-  {
-    id: '1',
-    title: 'Morning City Loop',
-    date: 'Oct 12, 2023 • 08:30 AM',
-    relativeDate: 'Yesterday',
-    distance: '25.4 km',
-    time: '1h 12m',
-    avgSpeed: '21.2 km/h',
-    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuBdYG9cQdQvNsJ9f1N_iDa29eDnW0k9TqikNOjoli04Kb34-Xd6M88xkRDhaXyaIv4StO-byUGfirCBeuDdCSE-kUTtNgca8VtQS9jz09NrBLH2bWjgFozxxFvaWCnH6o1zczz0G-PGnDKoPvQ5gMhmNmP62P1uKlq7HC2BVnw3RamWqSisFSGTgms26szDW9AHyyDNlWoiJwyVSuP85rxnA9u412WJxbcuzLpvV0gq_kbJg98n0J-qOFvzHr_t8yu_GqP-1zaLlo2B',
-  },
-  {
-    id: '2',
-    title: 'Coastal Sunset Sprint',
-    date: 'Oct 10, 2023 • 05:45 PM',
-    relativeDate: '3 Days Ago',
-    distance: '42.1 km',
-    time: '2h 05m',
-    avgSpeed: '24.8 km/h',
-  },
-  {
-    id: '3',
-    title: 'Mountain Climb Test',
-    date: 'Oct 08, 2023 • 07:15 AM',
-    relativeDate: 'Last Week',
-    distance: '18.5 km',
-    time: '1h 45m',
-    avgSpeed: '12.2 km/h',
-    elevation: '850m',
-  },
-  {
-    id: '4',
-    title: 'Quick Lunch Break Ride',
-    date: 'Oct 05, 2023 • 12:30 PM',
-    relativeDate: 'Oct 05',
-    distance: '12.4 km',
-    time: '35 min',
-    avgSpeed: '22.1 km/h',
-  },
-];
+import { RideRouteMap } from '../ui/RideRouteMap';
 
 export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: string) => void }) {
   const { data: rides, isLoading } = useRides();
@@ -111,9 +71,11 @@ export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: st
     >
       <View style={styles.cardIndicator} />
       <View style={styles.cardContent}>
+
         <View style={styles.cardHeader}>
-          <View style={[styles.activityImage, styles.imagePlaceholder]}>
-            <Bike size={24} color="#4ade80" />
+          <View style={styles.activityImageContainer}>
+            {/* @ts-ignore */}
+            <RideRouteMap route={item.route} style={StyleSheet.absoluteFillObject} />
           </View>
           <View style={styles.textContainer}>
             <View style={styles.titleRow}>
@@ -336,15 +298,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 16,
   },
-  activityImage: {
+  activityImageContainer: {
     width: 100,
     height: 80,
     borderRadius: 8,
-  },
-  imagePlaceholder: {
+    overflow: 'hidden',
     backgroundColor: '#f1f5f9',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   textContainer: {
     flex: 1,
