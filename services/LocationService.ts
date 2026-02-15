@@ -18,7 +18,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-interface RideState {
+export interface RideState {
   startTime: number;
   totalDistance: number; // in meters
   lastLocation: { latitude: number; longitude: number } | null;
@@ -27,6 +27,7 @@ interface RideState {
   gpsSignalLost: boolean;
   lastUpdateTime: number;
   lastMovementTime: number;
+  currentSpeed: number; // in m/s
 }
 
 // Notification update timer reference
@@ -96,6 +97,11 @@ const handleLocationUpdates = async (locations: Location.LocationObject[]) => {
     state.gpsSignalLost = false; // We got an update, so GPS is working
 
     locations.forEach(loc => {
+      // Update current speed (ensure non-negative, -1 means unavailable)
+      state.currentSpeed = (loc.coords.speed !== null && loc.coords.speed >= 0) 
+        ? loc.coords.speed 
+        : 0;
+
       // Check if user is moving (speed > 0.5 m/s = ~1.8 km/h)
       const isMoving = loc.coords.speed !== null && loc.coords.speed > 0.5;
 
@@ -155,14 +161,15 @@ const updateRideNotification = async () => {
     
     const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     const distanceKm = (state.totalDistance / 1000).toFixed(2);
+    const speedKmh = (state.currentSpeed * 3.6).toFixed(1); // Convert m/s to km/h
     
     let bodyText: string;
     if (gpsLost) {
       bodyText = `⏱️ ${timeStr} • 📍 Waiting for GPS...`;
     } else if (state.isPaused) {
-      bodyText = `⏱️ ${timeStr} • 📏 ${distanceKm} km (Paused)`;
+      bodyText = `⏱️ ${timeStr} • 📏 ${distanceKm} km • 🏃 ${speedKmh} km/h (Paused)`;
     } else {
-      bodyText = `⏱️ ${timeStr} • 📏 ${distanceKm} km`;
+      bodyText = `⏱️ ${timeStr} • 📏 ${distanceKm} km • 🏃 ${speedKmh} km/h`;
     }
 
     await Notifications.scheduleNotificationAsync({
@@ -237,6 +244,7 @@ export const startBackgroundTracking = async () => {
     gpsSignalLost: false,
     lastUpdateTime: Date.now(),
     lastMovementTime: Date.now(),
+    currentSpeed: 0,
   };
   await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(initialState));
 
@@ -356,4 +364,21 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c; // Distance in metres
+};
+
+/**
+ * Check for an active ride (e.g., after app restart)
+ */
+export const checkForActiveRide = async (): Promise<RideState | null> => {
+  try {
+    const state = await getRideState();
+    if (state && state.isActive) {
+      // Resume notification updates if active
+      startNotificationUpdateTimer();
+      return state; 
+    }
+  } catch (e) {
+    console.error("Error checking for active ride", e);
+  }
+  return null;
 };

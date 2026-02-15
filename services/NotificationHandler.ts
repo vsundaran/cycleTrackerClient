@@ -1,48 +1,72 @@
 import * as Notifications from 'expo-notifications';
+import * as Haptics from 'expo-haptics';
 import { stopBackgroundTracking } from './LocationService';
 
-/**
- * Notification event handler for ride tracking
- * This service handles notification actions and provides callbacks for navigation
- */
-
-type NotificationActionCallback = (action: 'STOP') => void;
-
-let actionCallback: NotificationActionCallback | null = null;
-
-/**
- * Register a callback to handle notification actions
- * @param callback Function to call when notification action is triggered
- */
-export const registerNotificationActionHandler = (callback: NotificationActionCallback) => {
-  actionCallback = callback;
-};
-
-/**
- * Unregister the notification action handler
- */
-export const unregisterNotificationActionHandler = () => {
-  actionCallback = null;
-};
+// Callback for handling notification actions
+let stopRideCallback: (() => void) | null = null;
 
 /**
  * Initialize notification response listener
- * This should be called once at app startup
+ * Handles user interactions with notifications (taps and action buttons)
  */
 export const initNotificationResponseListener = () => {
   const subscription = Notifications.addNotificationResponseReceivedListener(async (response) => {
-    const actionId = response.actionIdentifier;
+    const actionIdentifier = response.actionIdentifier;
     
-    if (actionId === 'STOP' || actionId === Notifications.DEFAULT_ACTION_IDENTIFIER) {
-      // Stop tracking
-      await stopBackgroundTracking();
-      
-      // Trigger callback if registered
-      if (actionCallback) {
-        actionCallback('STOP');
-      }
+    // Handle "Stop Ride" action button
+    if (actionIdentifier === 'STOP') {
+      await handleStopRideAction();
+    }
+    
+    // Handle notification tap (when user taps the notification body)
+    if (actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER) {
+      // User tapped the notification - app will be brought to foreground
+      // The app navigation will handle showing the appropriate screen
+      console.log('Notification tapped - app brought to foreground');
     }
   });
 
   return subscription;
 };
+
+/**
+ * Handle the "Stop Ride" action from notification
+ * Stops tracking, provides haptic feedback, and triggers callback
+ */
+export const handleStopRideAction = async () => {
+  try {
+    // Provide haptic feedback
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    
+    // Stop background tracking
+    await stopBackgroundTracking();
+    
+    // Trigger the registered callback (e.g., navigate to summary, save ride)
+    if (stopRideCallback) {
+      stopRideCallback();
+    }
+  } catch (error) {
+    console.error('Error handling stop ride action:', error);
+  }
+};
+
+/**
+ * Register a callback to be executed when "Stop Ride" is pressed
+ * @param callback Function to execute (e.g., navigate to summary, save ride)
+ */
+export const registerStopRideCallback = (callback: () => void) => {
+  stopRideCallback = callback;
+};
+
+/**
+ * Unregister the stop ride callback
+ */
+export const unregisterStopRideCallback = () => {
+  stopRideCallback = null;
+};
+
+// Legacy support for existing code
+export const registerNotificationActionHandler = (callback: (action: string) => void) => {
+    registerStopRideCallback(() => callback('STOP'));
+};
+export const unregisterNotificationActionHandler = unregisterStopRideCallback;

@@ -4,9 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Bike, Settings, Navigation, Plus, Minus, Route, Gauge, Pause, Play, Square, RefreshCcw } from 'lucide-react-native';
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as Haptics from 'expo-haptics';
 import { useCreateRide, useUpdateRideCoordinates, useEndRide } from '../../hooks/useRides';
-import { startBackgroundTracking, stopBackgroundTracking, initBackgroundFetch } from '../../services/LocationService';
+import { startBackgroundTracking, stopBackgroundTracking, initBackgroundFetch, checkForActiveRide } from '../../services/LocationService';
 import { registerNotificationActionHandler, unregisterNotificationActionHandler, initNotificationResponseListener } from '../../services/NotificationHandler';
+import { requestAllPermissions } from '../../services/PermissionService';
 import { CustomModal } from '../ui/CustomModal';
 
 const { width, height } = Dimensions.get('window');
@@ -91,9 +93,10 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
   // Initial location request and notification setup
   useEffect(() => {
     (async () => {
-      let { status: permissionStatus } = await Location.requestForegroundPermissionsAsync();
-      if (permissionStatus !== 'granted') {
-        console.error('Permission to access location was denied');
+      // 1. Check/Request Permissions
+      const perms = await requestAllPermissions();
+      if (!perms.foregroundLocation) {
+        // Handle denial if needed, but PermissionService already showed alert
         return;
       }
 
@@ -102,15 +105,32 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
       
       await initBackgroundFetch();
       
+      // 2. Check for active ride (recovery from kill)
+      const savedState = await checkForActiveRide();
+      if (savedState && savedState.isActive) {
+        // Resume UI state
+        setStatus(savedState.isPaused ? 'paused' : 'active');
+        setDistance(savedState.totalDistance);
+        
+        // Restore timer
+        const now = Date.now();
+        const durationSec = Math.floor((now - savedState.startTime) / 1000);
+        setSeconds(durationSec);
+        
+        // We need to fetch the ride ID from somewhere if we want to sync properly.
+        // For now, we might assume the notification action handles the critical "Stop" 
+        // even if we don't have the rideId in UI state immediately.
+        // ideally LocationService should store rideId too.
+        // For this iteration, we'll focus on visual recovery.
+      }
+
       // Initialize notification response listener
       const subscription = initNotificationResponseListener();
       
       // Register handler for notification actions
-      registerNotificationActionHandler((action) => {
-        if (action === 'STOP') {
-          // Navigate to summary when stop is pressed from notification
-          onNavigate('RideSummary');
-        }
+      registerNotificationActionHandler(() => {
+        // Navigate to summary when stop is pressed from notification
+        onNavigate('RideSummary');
       });
       
       // Cleanup on unmount
@@ -253,6 +273,7 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
 
   const handleStart = async () => {
     try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
       const dynamicName = getDynamicRideName();
       const newRide = await createRideMutation.mutateAsync(dynamicName);
       setRideId(newRide._id);
@@ -262,13 +283,17 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
     }
   };
 
-  const handlePause = () => setStatus(status === 'active' ? 'paused' : 'active');
+  const handlePause = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setStatus(status === 'active' ? 'paused' : 'active');
+  };
 
   const confirmStop = async () => {
     if (!rideId) return;
     setShowStopModal(false);
 
     try {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Stop background tracking first
       await stopBackgroundTracking();
       
@@ -286,7 +311,10 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
     }
   };
 
-  const handleStop = () => setShowStopModal(true);
+  const handleStop = async () => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setShowStopModal(true);
+  };
 
 
 
