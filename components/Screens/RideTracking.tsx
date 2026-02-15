@@ -5,7 +5,7 @@ import { Bike, Settings, Navigation, Plus, Minus, Route, Gauge, Pause, Play, Squ
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useCreateRide, useUpdateRideCoordinates, useEndRide } from '../../hooks/useRides';
-import { startBackgroundTracking, stopBackgroundTracking } from '../../services/LocationTask';
+import { startBackgroundTracking, stopBackgroundTracking, initBackgroundFetch } from '../../services/LocationService';
 import { CustomModal } from '../ui/CustomModal';
 
 const { width, height } = Dimensions.get('window');
@@ -97,7 +97,7 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
       let initialLocation = await Location.getCurrentPositionAsync({});
       setLocation(initialLocation);
       
-      // Background tracking initialized in useEffect
+      await initBackgroundFetch();
     })();
   }, []);
 
@@ -170,9 +170,6 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
 
     return () => {
       if (subscriber) subscriber.remove();
-      // We don't stop background tracking here blindly on unmount, 
-      // because we want it to run if the ride is still active.
-      // But if status changes to non-active, the else block above handles it.
     };
   }, [status]);
 

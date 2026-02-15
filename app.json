@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Cardio Tracker",
-    "slug": "cardio-tracker",
+    "slug": "cycle-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -22,9 +22,12 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Cardio Tracker needs access to your location to track your rides and calculate distance even when the app is in the background.",
         "UIBackgroundModes": [
           "location",
+          "fetch",
+          "location",
           "fetch"
         ]
-      }
+      },
+      "bundleIdentifier": "com.sundaran.cycletracker"
     },
     "android": {
       "adaptiveIcon": {
