@@ -10,6 +10,8 @@ interface ValidAnimatedPressableProps extends PressableProps {
   children: React.ReactNode;
 }
 
+const AnimatedPressableComponent = Animated.createAnimatedComponent(Pressable);
+
 export const AnimatedPressable: React.FC<ValidAnimatedPressableProps> = ({
   children,
   style,
@@ -22,7 +24,7 @@ export const AnimatedPressable: React.FC<ValidAnimatedPressableProps> = ({
   const { animatedStyle, handlers } = usePress({ scaleActive, opacityActive });
 
   return (
-    <Pressable
+    <AnimatedPressableComponent
       onPressIn={(e) => {
         handlers.onPressIn();
         onPressIn?.(e);
@@ -31,11 +33,10 @@ export const AnimatedPressable: React.FC<ValidAnimatedPressableProps> = ({
         handlers.onPressOut();
         onPressOut?.(e);
       }}
+      style={[style, animatedStyle]}
       {...props}
     >
-      <Animated.View style={[style, animatedStyle]}>
-        {children}
-      </Animated.View>
-    </Pressable>
+      {children}
+    </AnimatedPressableComponent>
   );
 };

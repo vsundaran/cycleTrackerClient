@@ -2,6 +2,7 @@ import * as TaskManager from 'expo-task-manager';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 const LOCATION_TASK_NAME = 'background-location-task';
 const RIDE_STATE_KEY = 'ride_state';
@@ -51,6 +52,35 @@ export const initBackgroundFetch = async () => {
             lightColor: '#FF231F7C',
         });
     }
+
+    // Set up notification categories for actions
+    await Notifications.setNotificationCategoryAsync('ride-running', [
+        { identifier: 'PAUSE', buttonTitle: 'Pause', options: { opensAppToForeground: false } },
+        { identifier: 'STOP', buttonTitle: 'Stop', options: { opensAppToForeground: true } },
+    ]);
+
+    await Notifications.setNotificationCategoryAsync('ride-paused', [
+        { identifier: 'RESUME', buttonTitle: 'Resume', options: { opensAppToForeground: false } },
+        { identifier: 'STOP', buttonTitle: 'Stop', options: { opensAppToForeground: true } },
+    ]);
+};
+
+export const initNotificationListeners = () => {
+    Notifications.addNotificationResponseReceivedListener(async (response) => {
+        const actionId = response.actionIdentifier;
+        if (actionId === 'PAUSE') {
+            await pauseBackgroundTracking();
+            // Force an immediate notification update to reflect pause state
+            const state = await getRideState();
+            if(state) await updateNotification(state);
+        } else if (actionId === 'RESUME') {
+            await resumeBackgroundTracking();
+            const state = await getRideState();
+            if(state) await updateNotification(state);
+        } 
+        // STOP is handled by opening the app; the UI should detect and handle if needed, 
+        // or user manually clicks stop in the open screen.
+    });
 };
 
 const handleLocationUpdates = async (locations: Location.LocationObject[]) => {
@@ -105,16 +135,20 @@ const updateNotification = async (state: RideState) => {
   
   const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   const distanceKm = (state.totalDistance / 1000).toFixed(2);
+  
+  const categoryId = state.isPaused ? 'ride-paused' : 'ride-running';
+  const title = state.isPaused ? 'Ride Paused' : 'Ride in Progress';
 
   await Notifications.scheduleNotificationAsync({
     identifier: NOTIFICATION_ID,
     content: {
-      title: 'Ride in Progress',
+      title: title,
       body: `Time: ${timeStr} • Dist: ${distanceKm} km`,
       sticky: true,
       autoDismiss: false,
       color: '#4ade80',
       priority: Notifications.AndroidNotificationPriority.LOW,
+      categoryIdentifier: categoryId,
     },
     trigger: null,
   });
@@ -180,6 +214,19 @@ export const resumeBackgroundTracking = async () => {
     }
 };
 
+
+const getRideState = async (): Promise<RideState | null> => {
+    try {
+        const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
+        if (stateStr) {
+            return JSON.parse(stateStr);
+        }
+    } catch (e) {
+        console.error("Error getting ride state", e);
+    }
+    return null;
+};
+
 // Helper for distance calculation (Haversine)
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371e3; // metres
@@ -196,4 +243,4 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 };
 
-import { Platform } from 'react-native';
+

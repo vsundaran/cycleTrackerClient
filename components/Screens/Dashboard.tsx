@@ -142,9 +142,22 @@ export default function DashboardScreen({ onNavigate }: { onNavigate: (screen: s
                   onPress={() => onNavigate('RideSummary')}
                   style={{ borderRadius: 16, overflow: 'hidden', height: 128, backgroundColor: '#f1f5f9' }}
                 >
-                  {/* @ts-ignore */}
-                  <RideRouteMap route={ride.route} style={StyleSheet.absoluteFillObject} />
-                  <View style={styles.activityOverlay} />
+                  {ride.status === 'active' ? (
+                     <View style={[StyleSheet.absoluteFill, { backgroundColor: '#122017', alignItems: 'center', justifyContent: 'center' }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#ef4444' }} />
+                            <Text style={{ color: '#4ade80', fontSize: 16, fontWeight: 'bold', letterSpacing: 2 }}>LIVE TRACKING</Text>
+                        </View>
+                        <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 4 }}>Tap to view details</Text>
+                     </View>
+                  ) : (
+                    <>
+                      {/* @ts-ignore */}
+                      <RideRouteMap route={ride.route} style={StyleSheet.absoluteFillObject} />
+                      <View style={styles.activityOverlay} />
+                    </>
+                  )}
+                  
                   <View style={styles.activityInfo}>
                     <Text style={styles.activityDate}>
                       {new Date(ride.startTime).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}

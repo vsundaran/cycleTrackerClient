@@ -30,12 +30,16 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './services/queryClient';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { useEffect } from 'react';
+import { initNotificationListeners } from './services/LocationService';
 
 function MainApp() {
   const [currentScreen, setCurrentScreen] = useState('Dashboard');
   const { user, isLoading } = useAuth();
 
   useEffect(() => {
+    // Initialize notification listeners
+    initNotificationListeners();
+
     if (!isLoading && user) {
       // If user is already logged in, we are already on Dashboard by default,
       // but we could explicitly set it or handle specific landing logic here.

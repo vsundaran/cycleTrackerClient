@@ -69,19 +69,26 @@ export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: st
       index={index}
       onPress={() => onNavigate('RideSummary')}
     >
-      <View style={styles.cardIndicator} />
+      <View style={[styles.cardIndicator, { backgroundColor: item.status === 'active' ? '#ef4444' : '#4ade80' }]} />
       <View style={styles.cardContent}>
 
         <View style={styles.cardHeader}>
-          <View style={styles.activityImageContainer}>
-            {/* @ts-ignore */}
-            <RideRouteMap route={item.route} style={StyleSheet.absoluteFillObject} />
+          <View style={[styles.activityImageContainer, item.status === 'active' && { backgroundColor: '#122017' }]}>
+            {item.status === 'active' ? (
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' }} />
+                    <Text style={{ color: '#4ade80', fontSize: 10, fontWeight: 'bold' }}>LIVE</Text>
+                </View>
+            ) : (
+                /* @ts-ignore */
+                <RideRouteMap route={item.route} style={StyleSheet.absoluteFillObject} />
+            )}
           </View>
           <View style={styles.textContainer}>
             <View style={styles.titleRow}>
               <Text style={styles.activityTitle}>{item.title}</Text>
-              <Text style={styles.relativeDate}>
-                {new Date(item.startTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+              <Text style={[styles.relativeDate, item.status === 'active' && { color: '#ef4444' }]}>
+                {item.status === 'active' ? 'IN PROGRESS' : new Date(item.startTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
               </Text>
             </View>
             <Text style={styles.activityDate}>

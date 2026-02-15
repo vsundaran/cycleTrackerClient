@@ -8,6 +8,58 @@ import { useRide } from '../../hooks/useRides';
 export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavigate: (screen: string) => void, rideId?: string }) {
   const { data: ride, isLoading } = useRide(rideId);
 
+  const mapRef = React.useRef<MapView>(null);
+
+  React.useEffect(() => {
+    if (ride?.route && ride.route.length > 0 && mapRef.current) {
+      // Small timeout to ensure map is ready
+      setTimeout(() => {
+        mapRef.current?.fitToCoordinates(ride.route, {
+          edgePadding: { top: 50, right: 50, bottom: 50, left: 50 },
+          animated: true,
+        });
+      }, 500);
+    }
+  }, [ride]);
+
+  // Helper functions
+  const calculateTotalDistance = (route: any[]) => {
+    if (!route || route.length < 2) return 0;
+    
+    let totalDist = 0;
+    const R = 6371; // km
+
+    for (let i = 1; i < route.length; i++) {
+        const p1 = route[i-1];
+        const p2 = route[i];
+        
+        const dLat = (p2.latitude - p1.latitude) * Math.PI / 180;
+        const dLon = (p2.longitude - p1.longitude) * Math.PI / 180;
+        const a = 
+          Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(p1.latitude * Math.PI / 180) * Math.cos(p2.latitude * Math.PI / 180) * 
+          Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        
+        totalDist += R * c;
+    }
+    return totalDist;
+  };
+
+  const dynamicDistance = React.useMemo(() => {
+    if (!ride) return 0;
+    // If ride has distance, use it. Otherwise calculate from route.
+    if (ride.distance && ride.distance > 0) return ride.distance;
+    return calculateTotalDistance(ride.route);
+  }, [ride]);
+
+  const formatDuration = (seconds?: number) => {
+    if (!seconds) return '00:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   if (isLoading) {
     return (
       <View style={[styles.container, styles.center]}>
@@ -27,38 +79,6 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
     );
   }
 
-  const getInitialRegion = () => {
-    if (!ride.route || ride.route.length === 0) {
-      return {
-        latitude: 37.78825,
-        longitude: -122.4324,
-        latitudeDelta: 0.0922,
-        longitudeDelta: 0.0421,
-      };
-    }
-
-    const latitudes = ride.route.map(p => p.latitude);
-    const longitudes = ride.route.map(p => p.longitude);
-    const minLat = Math.min(...latitudes);
-    const maxLat = Math.max(...latitudes);
-    const minLng = Math.min(...longitudes);
-    const maxLng = Math.max(...longitudes);
-
-    return {
-      latitude: (minLat + maxLat) / 2,
-      longitude: (minLng + maxLng) / 2,
-      latitudeDelta: Math.max((maxLat - minLat) * 1.5, 0.01),
-      longitudeDelta: Math.max((maxLng - minLng) * 1.5, 0.01),
-    };
-  };
-
-  const formatDuration = (seconds?: number) => {
-    if (!seconds) return '00:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -73,8 +93,8 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
         <View style={styles.mapContainer}>
           <View style={styles.mapWrapper}>
             <MapView
+              ref={mapRef}
               style={styles.map}
-              initialRegion={getInitialRegion()}
               scrollEnabled={false}
               zoomEnabled={false}
               pitchEnabled={false}
@@ -84,7 +104,7 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
                 <Polyline
                   coordinates={ride.route}
                   strokeColor="#4ade80"
-                  strokeWidth={5}
+                  strokeWidth={6}
                 />
               )}
             </MapView>
@@ -95,7 +115,7 @@ export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavig
         <View style={styles.primaryMetricCard}>
           <Text style={styles.primaryLabel}>TOTAL DISTANCE</Text>
           <Text style={styles.primaryValue}>
-            {ride.distance?.toFixed(1) || '0.0'} <Text style={styles.primaryUnit}>KM</Text>
+            {dynamicDistance.toFixed(2)} <Text style={styles.primaryUnit}>KM</Text>
           </Text>
           <View style={styles.dateSection}>
             <Calendar size={14} color="#64748b" />
