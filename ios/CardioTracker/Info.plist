@@ -47,11 +47,11 @@
       <true/>
     </dict>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Cardio Tracker needs access to your location to track your rides and calculate distance even when the app is in the background.</string>
+    <string>Allow Cycle Tracker to track your rides even when the app is in the background.</string>
     <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>Allow Cycle Tracker to track your rides even when the app is in the background.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>Cardio Tracker needs access to your location to track your rides and calculate distance.</string>
+    <string>Allow Cycle Tracker to track your rides.</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
