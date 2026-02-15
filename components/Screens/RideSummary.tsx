@@ -5,7 +5,7 @@ import { ArrowLeft, Calendar, Timer, Gauge, Flame, Bolt } from 'lucide-react-nat
 import MapView, { Polyline } from 'react-native-maps';
 import { useRide } from '../../hooks/useRides';
 
-export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavigate: (screen: string) => void, rideId?: string }) {
+export default function RideSummary({ onNavigate, rideId = 'latest' }: { onNavigate: (screen: string, params?: any) => void, rideId?: string }) {
   const { data: ride, isLoading } = useRide(rideId);
 
   const mapRef = React.useRef<MapView>(null);

@@ -9,7 +9,7 @@ import { AnimatedCard } from '../../animations/components/AnimatedCard';
 import { AnimatedPressable } from '../../animations/components/AnimatedPressable';
 import { RideRouteMap } from '../ui/RideRouteMap';
 
-export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: string) => void }) {
+export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: string, params?: any) => void }) {
   const { data: rides, isLoading } = useRides();
 
   // Calculate Monthly Summary and Growth
@@ -67,7 +67,7 @@ export default function ActivitiesList({ onNavigate }: { onNavigate: (screen: st
     <AnimatedCard 
       style={styles.activityCard} 
       index={index}
-      onPress={() => onNavigate('RideSummary')}
+      onPress={() => onNavigate('RideSummary', { rideId: item._id })}
     >
       <View style={[styles.cardIndicator, { backgroundColor: item.status === 'active' ? '#ef4444' : '#4ade80' }]} />
       <View style={styles.cardContent}>

@@ -30,15 +30,16 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './services/queryClient';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { useEffect } from 'react';
-import { initNotificationListeners } from './services/LocationService';
+import { initNotificationResponseListener } from './services/NotificationHandler';
 
 function MainApp() {
   const [currentScreen, setCurrentScreen] = useState('Dashboard');
+  const [screenParams, setScreenParams] = useState<any>({});
   const { user, isLoading } = useAuth();
 
   useEffect(() => {
     // Initialize notification listeners
-    initNotificationListeners();
+    initNotificationResponseListener();
 
     if (!isLoading && user) {
       // If user is already logged in, we are already on Dashboard by default,
@@ -52,9 +53,10 @@ function MainApp() {
   const CurrentScreenComponent = SCREEN_MAP[currentScreen];
   const showBottomNav = !['SignUp', 'SignIn'].includes(currentScreen);
 
-  const navigate = (screenName: string) => {
+  const navigate = (screenName: string, params?: any) => {
     if (SCREEN_MAP[screenName]) {
       setCurrentScreen(screenName);
+      setScreenParams(params || {});
     }
   };
 
@@ -73,7 +75,7 @@ function MainApp() {
       {/* Render the current screen */}
       <View style={{ flex: 1 }}>
         <ScreenTransition key={currentScreen}>
-          <CurrentScreenComponent onNavigate={navigate} />
+          <CurrentScreenComponent onNavigate={navigate} {...screenParams} />
         </ScreenTransition>
       </View>
 

@@ -1,7 +1,7 @@
 import { registerRootComponent } from 'expo';
 
 import App from './App';
-import './services/LocationTask'; // Register background task
+import './services/LocationService'; // Register background task
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,

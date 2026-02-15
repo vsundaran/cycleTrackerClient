@@ -6,12 +6,11 @@ import { Platform } from 'react-native';
 
 const LOCATION_TASK_NAME = 'background-location-task';
 const RIDE_STATE_KEY = 'ride_state';
-const NOTIFICATION_ID = 'ride-tracking-status';
+const NOTIFICATION_ID = 'ride-tracking-notification';
 
 // Configure notifications
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
     shouldShowBanner: true,
@@ -24,65 +23,65 @@ interface RideState {
   totalDistance: number; // in meters
   lastLocation: { latitude: number; longitude: number } | null;
   isPaused: boolean;
+  isActive: boolean;
+  gpsSignalLost: boolean;
+  lastUpdateTime: number;
+  lastMovementTime: number;
 }
 
+// Notification update timer reference
+let notificationUpdateInterval: NodeJS.Timeout | null = null;
+
+/**
+ * Initialize background fetch and notification system
+ */
 export const initBackgroundFetch = async () => {
-    // Check if task is already defined
-    if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
-        TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
-            if (error) {
-            console.error(error);
-            return;
-            }
+  // Check if task is already defined
+  if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
+    TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+      if (error) {
+        console.error('Background location task error:', error);
+        return;
+      }
 
-            if (data) {
-            const { locations } = data as { locations: Location.LocationObject[] };
-            await handleLocationUpdates(locations);
-            }
-        });
-    }
-    
-
-    // Setup notification channel for Android
-    if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('ride-tracking', {
-            name: 'Ride Tracking',
-            importance: Notifications.AndroidImportance.LOW,
-            vibrationPattern: null, // No vibration
-            lightColor: '#FF231F7C',
-        });
-    }
-
-    // Set up notification categories for actions
-    await Notifications.setNotificationCategoryAsync('ride-running', [
-        { identifier: 'PAUSE', buttonTitle: 'Pause', options: { opensAppToForeground: false } },
-        { identifier: 'STOP', buttonTitle: 'Stop', options: { opensAppToForeground: true } },
-    ]);
-
-    await Notifications.setNotificationCategoryAsync('ride-paused', [
-        { identifier: 'RESUME', buttonTitle: 'Resume', options: { opensAppToForeground: false } },
-        { identifier: 'STOP', buttonTitle: 'Stop', options: { opensAppToForeground: true } },
-    ]);
-};
-
-export const initNotificationListeners = () => {
-    Notifications.addNotificationResponseReceivedListener(async (response) => {
-        const actionId = response.actionIdentifier;
-        if (actionId === 'PAUSE') {
-            await pauseBackgroundTracking();
-            // Force an immediate notification update to reflect pause state
-            const state = await getRideState();
-            if(state) await updateNotification(state);
-        } else if (actionId === 'RESUME') {
-            await resumeBackgroundTracking();
-            const state = await getRideState();
-            if(state) await updateNotification(state);
-        } 
-        // STOP is handled by opening the app; the UI should detect and handle if needed, 
-        // or user manually clicks stop in the open screen.
+      if (data) {
+        const { locations } = data as { locations: Location.LocationObject[] };
+        await handleLocationUpdates(locations);
+      }
     });
+  }
+
+  // Setup notification channel for Android
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('ride-tracking', {
+      name: 'Ride Tracking',
+      importance: Notifications.AndroidImportance.HIGH, // HIGH for lock screen visibility
+      vibrationPattern: null,
+      lightColor: '#4ade80',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      bypassDnd: false,
+      showBadge: false,
+    });
+  }
+
+  // Set up notification category with Stop action
+  await Notifications.setNotificationCategoryAsync('ride-active', [
+    { 
+      identifier: 'STOP', 
+      buttonTitle: 'Stop', 
+      options: { 
+        opensAppToForeground: true,
+        isDestructive: true,
+      } 
+    },
+  ]);
 };
 
+
+
+/**
+ * Handle location updates from background task
+ */
 const handleLocationUpdates = async (locations: Location.LocationObject[]) => {
   try {
     const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
@@ -90,70 +89,138 @@ const handleLocationUpdates = async (locations: Location.LocationObject[]) => {
 
     let state: RideState = JSON.parse(stateStr);
     
-    if (state.isPaused) return;
+    if (!state.isActive || state.isPaused) return;
 
-    let totalDistance = state.totalDistance;
-    let lastLocation = state.lastLocation;
+    const now = Date.now();
+    state.lastUpdateTime = now;
+    state.gpsSignalLost = false; // We got an update, so GPS is working
 
     locations.forEach(loc => {
-    // Calculate distance
-    let dist = 0;
-    if (state.lastLocation) {
-        dist = calculateDistance(
-        state.lastLocation.latitude,
-        state.lastLocation.longitude,
-        loc.coords.latitude,
-        loc.coords.longitude
-        );
-    }
-    
-    // basic noise filter
-    if (dist > 2) {
-        state.totalDistance += dist;
-    }
-    
-    state.lastLocation = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+      // Check if user is moving (speed > 0.5 m/s = ~1.8 km/h)
+      const isMoving = loc.coords.speed !== null && loc.coords.speed > 0.5;
+
+      if (isMoving) {
+        state.lastMovementTime = now;
+
+        // Calculate distance only when moving
+        if (state.lastLocation) {
+          const dist = calculateDistance(
+            state.lastLocation.latitude,
+            state.lastLocation.longitude,
+            loc.coords.latitude,
+            loc.coords.longitude
+          );
+          
+          // Filter noise: only add distance if > 2 meters
+          if (dist > 2) {
+            state.totalDistance += dist;
+          }
+        }
+        
+        state.lastLocation = { 
+          latitude: loc.coords.latitude, 
+          longitude: loc.coords.longitude 
+        };
+      }
     });
 
     // Update state
     await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
-
-    // Update notification
-    await updateNotification(state);
     
   } catch (error) {
     console.error('Error in background task:', error);
   }
 };
 
-const updateNotification = async (state: RideState) => {
-  const durationMs = Date.now() - state.startTime;
-  const durationSec = Math.floor(durationMs / 1000);
-  const hours = Math.floor(durationSec / 3600);
-  const minutes = Math.floor((durationSec % 3600) / 60);
-  const seconds = durationSec % 60;
-  
-  const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  const distanceKm = (state.totalDistance / 1000).toFixed(2);
-  
-  const categoryId = state.isPaused ? 'ride-paused' : 'ride-running';
-  const title = state.isPaused ? 'Ride Paused' : 'Ride in Progress';
+/**
+ * Update the persistent notification with current ride data
+ */
+const updateRideNotification = async () => {
+  try {
+    const state = await getRideState();
+    if (!state || !state.isActive) return;
 
-  await Notifications.scheduleNotificationAsync({
-    identifier: NOTIFICATION_ID,
-    content: {
-      title: title,
-      body: `Time: ${timeStr} • Dist: ${distanceKm} km`,
-      sticky: true,
-      autoDismiss: false,
-      color: '#4ade80',
-      priority: Notifications.AndroidNotificationPriority.LOW,
-      categoryIdentifier: categoryId,
-    },
-    trigger: null,
-  });
+    const now = Date.now();
+    
+    // Check for GPS signal loss (no updates for 10+ seconds)
+    const timeSinceLastUpdate = now - state.lastUpdateTime;
+    const gpsLost = timeSinceLastUpdate > 10000;
+
+    // Calculate duration
+    const durationMs = now - state.startTime;
+    const durationSec = Math.floor(durationMs / 1000);
+    const hours = Math.floor(durationSec / 3600);
+    const minutes = Math.floor((durationSec % 3600) / 60);
+    const seconds = durationSec % 60;
+    
+    const timeStr = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    const distanceKm = (state.totalDistance / 1000).toFixed(2);
+    
+    let bodyText: string;
+    if (gpsLost) {
+      bodyText = `⏱️ ${timeStr} • 📍 Waiting for GPS...`;
+    } else if (state.isPaused) {
+      bodyText = `⏱️ ${timeStr} • 📏 ${distanceKm} km (Paused)`;
+    } else {
+      bodyText = `⏱️ ${timeStr} • 📏 ${distanceKm} km`;
+    }
+
+    await Notifications.scheduleNotificationAsync({
+      identifier: NOTIFICATION_ID,
+      content: {
+        title: state.isPaused ? '⏸️ Ride Paused' : '🚴 Ride Active',
+        body: bodyText,
+        sticky: true,
+        autoDismiss: false,
+        color: '#4ade80',
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        categoryIdentifier: 'ride-active',
+        data: { rideId: 'current' },
+      },
+      trigger: null,
+    });
+
+    // Update GPS signal lost flag if changed
+    if (gpsLost !== state.gpsSignalLost) {
+      state.gpsSignalLost = gpsLost;
+      await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
+    }
+  } catch (error) {
+    console.error('Error updating notification:', error);
+  }
 };
 
+/**
+ * Start the notification update timer
+ */
+const startNotificationUpdateTimer = () => {
+  // Clear any existing timer
+  if (notificationUpdateInterval) {
+    clearInterval(notificationUpdateInterval);
+  }
+
+  // Update notification every second for live timer
+  notificationUpdateInterval = setInterval(() => {
+    updateRideNotification();
+  }, 1000);
+
+  // Initial update
+  updateRideNotification();
+};
+
+/**
+ * Stop the notification update timer
+ */
+const stopNotificationUpdateTimer = () => {
+  if (notificationUpdateInterval) {
+    clearInterval(notificationUpdateInterval);
+    notificationUpdateInterval = null;
+  }
+};
+
+/**
+ * Start background location tracking
+ */
 export const startBackgroundTracking = async () => {
   const { status } = await Location.requestBackgroundPermissionsAsync();
   if (status !== 'granted') {
@@ -166,13 +233,18 @@ export const startBackgroundTracking = async () => {
     totalDistance: 0,
     lastLocation: null,
     isPaused: false,
+    isActive: true,
+    gpsSignalLost: false,
+    lastUpdateTime: Date.now(),
+    lastMovementTime: Date.now(),
   };
   await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(initialState));
 
+  // Start location updates
   await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
     accuracy: Location.Accuracy.BestForNavigation,
-    timeInterval: 1000,
-    distanceInterval: 5,
+    timeInterval: 1000, // Update every second
+    distanceInterval: 5, // Or every 5 meters
     foregroundService: {
       notificationTitle: "Cardio Tracker",
       notificationBody: "Tracking your ride...",
@@ -181,66 +253,107 @@ export const startBackgroundTracking = async () => {
     showsBackgroundLocationIndicator: true, // iOS
     pausesUpdatesAutomatically: false,
   });
+
+  // Start notification update timer
+  startNotificationUpdateTimer();
 };
 
+/**
+ * Stop background location tracking
+ */
 export const stopBackgroundTracking = async () => {
+  // Stop notification updates
+  stopNotificationUpdateTimer();
+
+  // Stop location updates
   const hasStarted = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME);
   if (hasStarted) {
     await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
   }
+
+  // Clear state
   await AsyncStorage.removeItem(RIDE_STATE_KEY);
+
+  // Dismiss notification
   await Notifications.dismissNotificationAsync(NOTIFICATION_ID);
   await Notifications.dismissAllNotificationsAsync();
 };
 
+/**
+ * Pause background tracking (timer continues, distance stops)
+ */
 export const pauseBackgroundTracking = async () => {
-    const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
-    if (stateStr) {
-        const state = JSON.parse(stateStr);
-        state.isPaused = true;
-        await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
-    }
+  const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
+  if (stateStr) {
+    const state: RideState = JSON.parse(stateStr);
+    state.isPaused = true;
+    await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
+    await updateRideNotification(); // Update notification to show paused state
+  }
 };
 
+/**
+ * Resume background tracking
+ */
 export const resumeBackgroundTracking = async () => {
+  const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
+  if (stateStr) {
+    const state: RideState = JSON.parse(stateStr);
+    state.isPaused = false;
+    await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
+    await updateRideNotification(); // Update notification to show active state
+  }
+};
+
+/**
+ * Get current ride state
+ */
+export const getRideState = async (): Promise<RideState | null> => {
+  try {
     const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
     if (stateStr) {
-        const state = JSON.parse(stateStr);
-        state.isPaused = false;
-        // Adjust start time to account for pause duration if needed, 
-        // but for simple elapsed time since start, we might keep it simple or store 'accumulatedPausedTime'
-        // For now, let's just resume flag.
-        await AsyncStorage.setItem(RIDE_STATE_KEY, JSON.stringify(state));
+      return JSON.parse(stateStr);
     }
+  } catch (e) {
+    console.error("Error getting ride state", e);
+  }
+  return null;
 };
 
+/**
+ * Get current ride statistics
+ */
+export const getRideStats = async () => {
+  const state = await getRideState();
+  if (!state) return null;
 
-const getRideState = async (): Promise<RideState | null> => {
-    try {
-        const stateStr = await AsyncStorage.getItem(RIDE_STATE_KEY);
-        if (stateStr) {
-            return JSON.parse(stateStr);
-        }
-    } catch (e) {
-        console.error("Error getting ride state", e);
-    }
-    return null;
+  const now = Date.now();
+  const durationSec = Math.floor((now - state.startTime) / 1000);
+  const distanceKm = state.totalDistance / 1000;
+
+  return {
+    duration: durationSec,
+    distance: distanceKm,
+    isActive: state.isActive,
+    isPaused: state.isPaused,
+    gpsSignalLost: state.gpsSignalLost,
+  };
 };
 
-// Helper for distance calculation (Haversine)
-const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-  const R = 6371e3; // metres
-  const φ1 = lat1 * Math.PI/180; // φ, λ in radians
-  const φ2 = lat2 * Math.PI/180;
-  const Δφ = (lat2-lat1) * Math.PI/180;
-  const Δλ = (lon2-lon1) * Math.PI/180;
+/**
+ * Calculate distance between two coordinates using Haversine formula
+ */
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371e3; // Earth radius in metres
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
 
-  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
             Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ/2) * Math.sin(Δλ/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return R * c;
+  return R * c; // Distance in metres
 };
-
-

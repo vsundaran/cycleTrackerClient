@@ -6,6 +6,7 @@ import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { useCreateRide, useUpdateRideCoordinates, useEndRide } from '../../hooks/useRides';
 import { startBackgroundTracking, stopBackgroundTracking, initBackgroundFetch } from '../../services/LocationService';
+import { registerNotificationActionHandler, unregisterNotificationActionHandler, initNotificationResponseListener } from '../../services/NotificationHandler';
 import { CustomModal } from '../ui/CustomModal';
 
 const { width, height } = Dimensions.get('window');
@@ -87,7 +88,7 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
   const mapRef = useRef<MapView>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initial location request
+  // Initial location request and notification setup
   useEffect(() => {
     (async () => {
       let { status: permissionStatus } = await Location.requestForegroundPermissionsAsync();
@@ -100,8 +101,25 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
       setLocation(initialLocation);
       
       await initBackgroundFetch();
+      
+      // Initialize notification response listener
+      const subscription = initNotificationResponseListener();
+      
+      // Register handler for notification actions
+      registerNotificationActionHandler((action) => {
+        if (action === 'STOP') {
+          // Navigate to summary when stop is pressed from notification
+          onNavigate('RideSummary');
+        }
+      });
+      
+      // Cleanup on unmount
+      return () => {
+        subscription?.remove();
+        unregisterNotificationActionHandler();
+      };
     })();
-  }, []);
+  }, [onNavigate]);
 
   // Timer logic
   useEffect(() => {
@@ -251,6 +269,9 @@ export default function RideTracking({ onNavigate }: { onNavigate: (screen: stri
     setShowStopModal(false);
 
     try {
+      // Stop background tracking first
+      await stopBackgroundTracking();
+      
       const stats = {
         distance,
         duration: seconds,
